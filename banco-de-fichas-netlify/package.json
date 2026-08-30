@@ -1,0 +1,9 @@
+{
+  "name": "banco-de-fichas",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Banco de Fichas - app de estudio de vocabulario, con sincronizacion en Netlify Functions + Blobs.",
+  "dependencies": {
+    "@netlify/blobs": "*"
+  }
+}
