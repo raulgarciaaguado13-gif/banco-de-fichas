@@ -6,9 +6,14 @@
 // login.js en la cabecera "Authorization: Bearer <token>"; este archivo
 // recalcula ese mismo token a partir de las variables de entorno y lo
 // compara, así que no hace falta ninguna base de datos de sesiones.
+//
+// Nota: esta función usa la sintaxis "Functions v2" (export default, con
+// Request/Response nativos) porque Netlify Blobs necesita v2 para que las
+// credenciales se inyecten automáticamente en producción (con v1 daba
+// "MissingBlobsEnvironmentError").
 
-const crypto = require("crypto");
-const { getStore } = require("@netlify/blobs");
+import crypto from "node:crypto";
+import { getStore } from "@netlify/blobs";
 
 function expectedToken() {
   const expectedUser = process.env.FICHAS_USER || "";
@@ -21,39 +26,45 @@ function expectedToken() {
     .digest("hex");
 }
 
-exports.handler = async function (event) {
+export default async (req) => {
   const expected = expectedToken();
-  const authHeader =
-    (event.headers && (event.headers.authorization || event.headers.Authorization)) || "";
+  const authHeader = req.headers.get("authorization") || "";
   const token = authHeader.replace(/^Bearer\s+/i, "").trim();
 
   if (!expected || !token || token !== expected) {
-    return { statusCode: 401, body: JSON.stringify({ error: "No autorizado" }) };
+    return new Response(JSON.stringify({ error: "No autorizado" }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const store = getStore("fichas-data");
   const key = "decks";
 
-  if (event.httpMethod === "GET") {
+  if (req.method === "GET") {
     const raw = await store.get(key);
-    return {
-      statusCode: 200,
+    return new Response(raw || "null", {
+      status: 200,
       headers: { "Content-Type": "application/json" },
-      body: raw || "null",
-    };
+    });
   }
 
-  if (event.httpMethod === "POST") {
-    const text = event.body || "[]";
+  if (req.method === "POST") {
+    const text = await req.text();
     try {
       JSON.parse(text);
     } catch (e) {
-      return { statusCode: 400, body: JSON.stringify({ error: "JSON inválido" }) };
+      return new Response(JSON.stringify({ error: "JSON inválido" }), {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     await store.set(key, text);
-    return { statusCode: 200, body: JSON.stringify({ ok: true }) };
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
-  return { statusCode: 405, body: "Method not allowed" };
+  return new Response("Method not allowed", { status: 405 });
 };
-
