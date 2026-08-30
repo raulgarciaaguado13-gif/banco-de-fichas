@@ -10,19 +10,26 @@
 // Si el usuario/contraseña son correctos, devuelve un token derivado de ellos
 // (mismo cálculo que hace netlify/functions/decks.js para comprobar cada
 // petición posterior). Así no hace falta guardar sesiones en ningún sitio.
+//
+// Nota: esta función usa la sintaxis "Functions v2" (export default, con
+// Request/Response nativos) porque Netlify Blobs necesita v2 para que las
+// credenciales se inyecten automáticamente en producción.
 
-const crypto = require("crypto");
+import crypto from "node:crypto";
 
-exports.handler = async function (event) {
-  if (event.httpMethod !== "POST") {
-    return { statusCode: 405, body: "Method not allowed" };
+export default async (req) => {
+  if (req.method !== "POST") {
+    return new Response("Method not allowed", { status: 405 });
   }
 
   let body;
   try {
-    body = JSON.parse(event.body || "{}");
+    body = await req.json();
   } catch (e) {
-    return { statusCode: 400, body: JSON.stringify({ error: "JSON inválido" }) };
+    return new Response(JSON.stringify({ error: "JSON inválido" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const user = (body.user || "").trim();
@@ -33,17 +40,20 @@ exports.handler = async function (event) {
   const salt = process.env.FICHAS_SALT || "fichas-app-salt-v1";
 
   if (!expectedUser || !expectedPass) {
-    return {
-      statusCode: 500,
-      body: JSON.stringify({
+    return new Response(
+      JSON.stringify({
         error:
           "El sitio no tiene configuradas las variables FICHAS_USER y FICHAS_PASS en Netlify (Site settings > Environment variables).",
       }),
-    };
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
 
   if (user !== expectedUser || pass !== expectedPass) {
-    return { statusCode: 401, body: JSON.stringify({ error: "Usuario o contraseña incorrectos." }) };
+    return new Response(JSON.stringify({ error: "Usuario o contraseña incorrectos." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const token = crypto
@@ -51,10 +61,8 @@ exports.handler = async function (event) {
     .update(salt + "::" + expectedUser + "::" + expectedPass)
     .digest("hex");
 
-  return {
-    statusCode: 200,
+  return new Response(JSON.stringify({ token }), {
+    status: 200,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ token: token }),
-  };
+  });
 };
-
