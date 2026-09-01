@@ -258,6 +258,16 @@
     font-size:12px;
     color:var(--ink-faint);
   }
+  .deck-tile .dup-flag{
+    display:inline-flex;
+    align-self:flex-start;
+    font-size:11px;
+    font-weight:700;
+    color:var(--bad);
+    border:1px solid var(--bad);
+    padding:2px 8px;
+    border-radius:20px;
+  }
   .deck-tile .preview{
     font-size:13px;
     color:var(--ink-soft);
@@ -438,6 +448,59 @@
     font-size:14px;
   }
   .icon-btn:hover{background:var(--paper-2); color:var(--ink);}
+
+  /* ---------- Duplicate terms banner ---------- */
+  .dup-banner{
+    background:var(--card);
+    border:1px solid var(--bad);
+    border-radius:8px;
+    padding:14px 16px;
+    margin-bottom:14px;
+  }
+  .dup-banner-head{
+    font-weight:700;
+    color:var(--bad);
+    font-size:14px;
+    margin-bottom:10px;
+  }
+  .dup-group{
+    padding:8px 0;
+    border-top:1px solid var(--line);
+  }
+  .dup-group:first-of-type{border-top:none; padding-top:0;}
+  .dup-group-title{
+    font-family:"Fraunces", serif;
+    font-weight:600;
+    font-size:14px;
+    margin-bottom:6px;
+  }
+  .dup-instance{
+    display:flex;
+    align-items:center;
+    gap:8px;
+    padding:4px 0;
+  }
+  .dup-instance .dup-def{
+    flex:1;
+    font-size:13px;
+    color:var(--ink-soft);
+    overflow:hidden;
+    text-overflow:ellipsis;
+    white-space:nowrap;
+  }
+  .dup-instance .dup-del{
+    width:30px;height:30px;
+    color:var(--bad);
+    border-color:var(--bad);
+  }
+  @keyframes dupFlash{
+    0%{box-shadow:0 0 0 0 rgba(194,59,59,0.5);}
+    100%{box-shadow:0 0 0 8px rgba(194,59,59,0);}
+  }
+  .flash-row.dup-highlight{
+    animation:dupFlash 1s ease-out 2;
+    border-color:var(--bad);
+  }
 
   /* ---------- Bulk import modal ---------- */
   .modal-backdrop{
@@ -1309,6 +1372,26 @@
     return deck.cards.filter(function(c){ return c.status === statusFilter; });
   }
 
+  // Detecta términos repetidos (mismo texto, ignorando mayúsculas/minúsculas y espacios)
+  // dentro de un mismo mazo. Devuelve un grupo por cada término que aparece 2+ veces,
+  // con todas las fichas implicadas, para poder avisar y dejar eliminar la duplicada.
+  function normTerm(t){ return (t || "").trim().toLowerCase(); }
+
+  function findDuplicateGroups(deck){
+    var map = {};
+    deck.cards.forEach(function(c){
+      var key = normTerm(c.term);
+      if (!key) return;
+      (map[key] || (map[key] = [])).push(c);
+    });
+    var groups = [];
+    Object.keys(map).forEach(function(key){
+      if (map[key].length > 1) groups.push({ key: key, term: map[key][0].term, cards: map[key] });
+    });
+    groups.sort(function(a, b){ return a.term.localeCompare(b.term, "es"); });
+    return groups;
+  }
+
   var decks = loadDecks();
 
   function persist(){
@@ -1392,12 +1475,14 @@
 
     decks.forEach(function(d){
       var count = d.cards.length;
+      var dupGroups = findDuplicateGroups(d);
       var preview = d.cards.slice(0,3).map(function(c){ return esc(c.term); }).join(" · ");
       html += '<div class="deck-tile" data-deck="'+d.id+'" tabindex="0" role="button" aria-label="Abrir mazo '+esc(d.name)+'">'
         + '<div class="tab" style="background:'+d.color+'"></div>'
         + '<div class="punch"></div>'
         + '<h3>'+esc(d.name)+'</h3>'
         + '<div class="count mono">'+count+' ficha'+(count===1?'':'s')+'</div>'
+        + (dupGroups.length ? '<div class="dup-flag" title="Hay términos repetidos en este mazo">⚠ '+dupGroups.length+' repetido'+(dupGroups.length===1?'':'s')+'</div>' : '')
         + '<div class="preview">'+(preview || 'Sin fichas todavía')+'</div>'
         + '<div class="row-actions">'
         +   '<button class="btn btn-sm open-deck" data-deck="'+d.id+'">Abrir</button>'
@@ -1554,6 +1639,26 @@
 
     // Right panel: list
     html += '<div>';
+
+    var dupGroups = findDuplicateGroups(deck);
+    if (dupGroups.length){
+      html += '<div class="dup-banner">';
+      html += '<div class="dup-banner-head">⚠ '+dupGroups.length+' término'+(dupGroups.length===1?'':'s')+' repetido'+(dupGroups.length===1?'':'s')+' en este mazo</div>';
+      dupGroups.forEach(function(g){
+        html += '<div class="dup-group">';
+        html += '<div class="dup-group-title">“'+esc(g.term)+'” aparece '+g.cards.length+' veces</div>';
+        g.cards.forEach(function(c){
+          html += '<div class="dup-instance">'
+            + '<span class="dup-def">'+esc(c.definition)+'</span>'
+            + '<button class="btn btn-sm dup-jump" data-card="'+c.id+'">Ver</button>'
+            + '<button class="icon-btn dup-del" data-card="'+c.id+'" title="Eliminar esta ficha duplicada">&#10005;</button>'
+            + '</div>';
+        });
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+
     html += '<input type="text" class="card-search" id="card-search" placeholder="Buscar en este mazo…" value="'+esc(ui.search)+'">';
 
     var filtered = deck.cards.filter(function(c){
@@ -1744,6 +1849,32 @@
         ui.confirmDeleteId = null;
         persist();
         toast("Ficha eliminada.");
+        renderDeckView(deck.id);
+      };
+    });
+
+    // Duplicate-terms banner: jump to a card and/or delete it directly
+    document.querySelectorAll(".dup-jump").forEach(function(b){
+      b.onclick = function(){
+        var cardId = b.getAttribute("data-card");
+        if (ui.search){
+          ui.search = "";
+          renderDeckView(deck.id);
+        }
+        var row = document.querySelector('.flash-row[data-card="'+cardId+'"]');
+        if (row){
+          row.scrollIntoView({behavior:"smooth", block:"center"});
+          row.classList.add("dup-highlight");
+          setTimeout(function(){ row.classList.remove("dup-highlight"); }, 1800);
+        }
+      };
+    });
+    document.querySelectorAll(".dup-del").forEach(function(b){
+      b.onclick = function(){
+        var cardId = b.getAttribute("data-card");
+        deck.cards = deck.cards.filter(function(c){ return c.id !== cardId; });
+        persist();
+        toast("Ficha duplicada eliminada.");
         renderDeckView(deck.id);
       };
     });
