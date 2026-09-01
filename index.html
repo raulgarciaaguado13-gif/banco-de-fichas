@@ -571,6 +571,18 @@
   .option-btn.wrong .letter{color:var(--bad-ink);}
   .option-btn.dim{opacity:0.5;}
 
+  .reveal-wrap{
+    width:100%;
+    max-width:640px;
+    display:flex;
+    justify-content:center;
+    margin-bottom:8px;
+  }
+  .reveal-btn{
+    padding:16px 40px;
+    font-size:16px;
+  }
+
   .quiz-next{margin-top:24px; min-width:160px; justify-content:center;}
   .quiz-exit{margin-top:10px;}
 
@@ -1792,7 +1804,10 @@
       totalUnique: pool.length,
       score: 0,
       missedIds: [],
-      answered: false
+      answered: false,
+      revealed: false,
+      currentCardId: null,
+      currentOptions: null
     };
     go({view:"quiz"});
   }
@@ -1832,9 +1847,15 @@
     var card = deck.cards.find(function(c){ return c.id === cardId; });
     if (!card){ quiz.cursor++; renderQuizView(); return; } // ficha borrada durante la sesión: se salta
 
+    // Cada vez que llegamos a una ficha nueva, se oculta de nuevo hasta que se pulse "Lo tengo".
+    if (quiz.currentCardId !== card.id){
+      quiz.currentCardId = card.id;
+      quiz.currentOptions = null;
+      quiz.revealed = false;
+    }
+
     var promptField = currentField(quiz.reverse, true);
     var answerField = currentField(quiz.reverse, false);
-    var options = buildOptions(deck, card, quiz.reverse);
     var progressPct = quiz.totalUnique ? Math.round((quiz.score / quiz.totalUnique) * 100) : 0;
 
     var html = '';
@@ -1850,23 +1871,36 @@
       + '<h2 class="quiz-term">' + esc(card[promptField]) + '</h2>'
       + '</div>';
 
-    html += '<div class="options-grid">';
-    var letters = ["A","B","C","D"];
-    options.forEach(function(opt, i){
-      html += '<button class="option-btn" data-value="'+esc(opt)+'"><span class="letter">'+letters[i]+'</span><span>'+esc(opt)+'</span></button>';
-    });
-    html += '</div>';
+    if (!quiz.revealed){
+      html += '<div class="reveal-wrap"><button class="btn btn-primary reveal-btn" id="reveal-btn">Lo tengo</button></div>';
+    } else {
+      html += '<div class="options-grid">';
+      var letters = ["A","B","C","D"];
+      quiz.currentOptions.forEach(function(opt, i){
+        html += '<button class="option-btn" data-value="'+esc(opt)+'"><span class="letter">'+letters[i]+'</span><span>'+esc(opt)+'</span></button>';
+      });
+      html += '</div>';
+    }
 
     html += '<button class="btn btn-quiet quiz-exit" id="quiz-exit">Salir del test</button>';
     html += '</div>';
 
     app.innerHTML = html;
 
-    var correctValue = card[answerField];
-    var optionButtons = Array.prototype.slice.call(document.querySelectorAll(".option-btn"));
-    optionButtons.forEach(function(btn){
-      btn.addEventListener("click", function(){ handleAnswer(btn, correctValue, card, optionButtons); });
-    });
+    if (!quiz.revealed){
+      document.getElementById("reveal-btn").onclick = function(){
+        quiz.currentOptions = buildOptions(deck, card, quiz.reverse);
+        quiz.revealed = true;
+        renderQuizView();
+      };
+    } else {
+      var correctValue = card[answerField];
+      var optionButtons = Array.prototype.slice.call(document.querySelectorAll(".option-btn"));
+      optionButtons.forEach(function(btn){
+        btn.addEventListener("click", function(){ handleAnswer(btn, correctValue, card, optionButtons); });
+      });
+    }
+
     document.getElementById("quiz-exit").onclick = function(){
       if (autoAdvanceTimer){ clearTimeout(autoAdvanceTimer); autoAdvanceTimer = null; }
       quiz = null;
@@ -1967,8 +2001,12 @@
   }
 
   document.addEventListener("keydown", function(e){
-    if (route.view === "quiz" && quiz && quiz.answered && e.key === "Enter"){
+    if (route.view !== "quiz" || !quiz || e.key !== "Enter") return;
+    if (quiz.answered){
       advanceQuiz();
+    } else if (!quiz.revealed){
+      var revealBtn = document.getElementById("reveal-btn");
+      if (revealBtn) revealBtn.click();
     }
   });
 
